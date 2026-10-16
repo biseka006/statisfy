@@ -29,6 +29,43 @@ streamlit run app.py          # buka http://localhost:8501
 python -m pytest -q           # 10 tes inti
 ```
 
+## Deploy Gratis ke Streamlit Community Cloud (`streamlit.app`)
+
+Proyek ini sudah dilengkapi `.python-version` (Python 3.12), `packages.txt` (`libgomp1` untuk XGBoost),
+`requirements.txt`, dan `.streamlit/config.toml` sehingga siap jalan otomatis dari GitHub:
+
+1. Push repositori ini ke akun GitHub Anda.
+2. Buka **[share.streamlit.io](https://share.streamlit.io)** dan login dengan akun GitHub.
+3. Klik **Create app** → **Deploy a public app from GitHub**:
+   - **Repository:** `<username-github-anda>/Statify`
+   - **Branch:** `main`
+   - **Main file path:** `app.py`
+   - **App URL:** pilih subdomain sesuai keinginan (mis. `https://statify-id.streamlit.app`).
+4. Klik **Deploy!** — setiap kali Anda melakukan `git push` ke branch `main`, aplikasi di `streamlit.app` otomatis diperbarui.
+
+## Deploy ke VPS (Ubuntu, 2 vCPU / 4 GB)
+
+1. Arahkan DNS domain (mis. `statify.domainanda.id`) ke IP server.
+2. Salin proyek ke server (`git clone` atau `scp`).
+3. Jalankan sekali:
+
+   ```bash
+   sudo DOMAIN=statify.domainanda.id EMAIL=anda@email.com bash deploy/setup_server.sh
+   ```
+
+   Skrip ini membuat swap 2 GB, memasang Docker/Nginx/Certbot, menyalakan firewall (SSH, 80, 443),
+   menjalankan container, lalu memasang HTTPS. Jika SSH server Anda tidak di port 22, tambahkan
+   `SSH_PORT=<port>` agar Anda tidak terkunci dari server. Jika DNS belum mengarah ke server, skrip
+   berhenti sebelum HTTPS dan menampilkan perintah certbot untuk dijalankan nanti.
+4. Update kode berikutnya: `sudo bash deploy/update.sh`.
+
+Tanpa skrip: `docker compose up -d --build`, lalu pasang `deploy/nginx-statify.conf` dan
+`sudo certbot --nginx -d <domain>`.
+
+## Kapasitas yang sudah diuji
+
+Diuji pada 2 vCPU dengan Python 3.12, user non-root, dan Nginx di depan aplikasi:
+
 | Skenario | Hasil |
 | --- | --- |
 | 20 pengguna mengunggah CSV 19 MB bersamaan, 5 di antaranya melatih model | Tanpa error, puncak RAM 1,4 GB, upload ≤ 50 detik, training ≤ 2 menit (termasuk antre) |

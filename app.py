@@ -12,15 +12,15 @@ st.set_page_config(page_title="Statify — Stats and Simplify", page_icon="📊"
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 from statify import __version__, config, views  # noqa: E402
-from statify.data import DataLoadError, clean_data, load_dataset  # noqa: E402
+from statify.data import DataLoadError, clean_data, load_dataset, summary  # noqa: E402
 from statify.limits import BusyError  # noqa: E402
-from statify.theme import apply_theme, hero_svg  # noqa: E402
+from statify.theme import apply_theme, esc, hero_svg  # noqa: E402
 
 SAMPLE_DIR = Path(__file__).parent / "sample_data"
 SAMPLE_INFO = {
-    "iris": ("Iris", "150 bunga, tebak spesiesnya"),
-    "diabetes_progresi": ("Diabetes", "442 pasien, prediksi angka progresi"),
-    "penjualan_toko": ("Penjualan toko", "612 transaksi, ada data kosong & duplikat"),
+    "iris": ("🌸 Iris Dataset", "150 baris · 5 kolom · Klasifikasi spesies bunga"),
+    "diabetes_progresi": ("🩺 Diabetes Progresi", "442 baris · 11 kolom · Regresi skor progresi"),
+    "penjualan_toko": ("🛒 Penjualan Toko", "612 baris · 8 kolom · Uji cleaning & transaksi"),
 }
 PAGES = {
     "overview": ":material/table_view: Overview",
@@ -75,74 +75,132 @@ def uploader(label: str, key_suffix: str) -> None:
         st.rerun()
 
 
+def _health_score(df) -> int:
+    total_cells = max(df.shape[0] * df.shape[1], 1)
+    missing_ratio = df.isna().sum().sum() / total_cells
+    dup_ratio = df.duplicated().sum() / max(len(df), 1)
+    score = int(round(max(0.0, 100.0 * (1.0 - 0.7 * missing_ratio - 0.3 * dup_ratio))))
+    return min(100, max(0, score))
+
+
 def sidebar() -> None:
     sb = st.sidebar
-    sb.markdown(f"<div class='sf-wordmark'>Stat<b>ify</b></div><div class='sf-tagline'>{config.APP_TAGLINE}</div>",
-                unsafe_allow_html=True)
+    sb.markdown(
+        f"<div class='sf-brand-box'>"
+        f"<div class='sf-wordmark'>Stat<b>ify</b></div>"
+        f"<span class='sf-badge-ver'>v{__version__}</span>"
+        f"</div>"
+        f"<div class='sf-tagline'>{config.APP_TAGLINE} · Interactive Data Studio</div>",
+        unsafe_allow_html=True,
+    )
     sb.write("")
     if "df" in st.session_state:
         info = st.session_state["load_info"]
-        rows, cols = st.session_state["df"].shape
+        raw = st.session_state["df"]
+        cleaned = st.session_state["df_cleaned"]
+        rows, cols = cleaned.shape
+        raw_health = _health_score(raw)
+        clean_health = _health_score(cleaned)
+
         with sb.container(border=True):
-            st.markdown(f"**{info['name']}**")
-            st.caption(f"{rows:,} baris, {cols} kolom"
-                       + (f" (sampel dari {info['original_rows']:,})" if info["sampled"] else ""))
+            st.markdown(f"**:material/dataset: {esc(info['name'])}**")
+            st.caption(
+                f"{rows:,} baris bersih · {cols} kolom"
+                + (f" (sampel dari {info['original_rows']:,})" if info["sampled"] else "")
+            )
+            st.progress(clean_health / 100.0, text=f"Kualitas data: {clean_health}% (mentah {raw_health}%)")
+
             with st.popover("Ganti dataset", icon=":material/swap_horiz:", use_container_width=True):
-                uploader("Unggah file lain", "side")
-            if st.button("Hapus data", icon=":material/delete:", use_container_width=True):
+                uploader("Unggah file baru", "side")
+                st.divider()
+                st.caption("Atau pilih dataset contoh:")
+                samples = sorted(SAMPLE_DIR.glob("*.csv")) if SAMPLE_DIR.exists() else []
+                for path in samples:
+                    title, _ = SAMPLE_INFO.get(path.stem, (path.stem.title(), ""))
+                    if st.button(title, key=f"side_sample_{path.stem}", use_container_width=True):
+                        if ingest(path.read_bytes(), path.name, f"sample:{path.name}"):
+                            st.rerun()
+
+            if st.button("Tutup & hapus data", icon=":material/delete:", use_container_width=True):
                 clear_data()
                 st.session_state["uploader_key"] += 1
                 st.rerun()
+
+        # Status progres sesi interaktif
+        steps_done = [
+            ("Cleaning Otomatis", True),
+            ("Model ML", "ml_result" in st.session_state),
+            ("Clustering", "cluster_result" in st.session_state),
+            ("Auto-ML", "automl_result" in st.session_state),
+        ]
+        items_html = "".join(
+            f"<div class='sf-status-item'><span>{label}</span>"
+            f"<span class='{'sf-dot-ok' if ok else 'sf-dot-wait'}' title='{'Selesai' if ok else 'Belum dijalankan'}'></span></div>"
+            for label, ok in steps_done
+        )
+        sb.markdown("**Status Analisis Sesi**")
+        sb.markdown(f"<div class='sf-status-list'>{items_html}</div>", unsafe_allow_html=True)
     else:
-        sb.caption("Belum ada data. Unggah file di halaman utama.")
+        with sb.container(border=True):
+            st.markdown("**:material/cloud_upload: Belum ada dataset aktif**")
+            st.caption("Unggah file CSV/Excel atau klik salah satu dataset contoh di halaman utama untuk mulai bereksplorasi.")
 
     sb.divider()
-    sb.caption("Tema terang atau gelap bisa dipilih di menu ⋮ → Settings.")
-    sb.caption(f"Data hanya tersimpan di sesi ini dan hilang saat dihapus atau tab ditutup. Statify v{__version__}.")
+    sb.caption("💡 **Tips:** Tema terang/gelap dapat diubah lewat menu **⋮ → Settings**.")
+    sb.caption("🔒 Privasi terjaga: Data hanya di memori sesi Anda dan otomatis hilang saat tab ditutup.")
 
 
 def welcome() -> None:
     st.markdown(
         f"""<section class='sf-hero'>
           <div>
-            <h1>Dari tabel mentah ke jawaban yang jelas.</h1>
-            <p>Unggah CSV atau Excel. Statify membersihkan data, menampilkan grafik yang paling penting,
-            dan melatih model, lalu menjelaskan hasilnya dengan bahasa sehari-hari.</p>
+            <div class='sf-kicker'>✨ Tanpa Koding · Instan · Interaktif</div>
+            <h1>Dari tabel mentah ke <span>keputusan cerdas.</span></h1>
+            <p>Unggah CSV atau Excel Anda. Statify membersihkan data secara otomatis, menyajikan visualisasi interaktif,
+            melatih model Machine Learning, hingga menyediakan simulator prediksi langsung.</p>
+            <div class='sf-pills-row'>
+              <span class='sf-mini-pill'>🧹 Auto-Cleaning</span>
+              <span class='sf-mini-pill'>📊 Smart EDA</span>
+              <span class='sf-mini-pill'>🤖 ML + Simulator</span>
+              <span class='sf-mini-pill'>🔍 3 Metode Clustering</span>
+            </div>
           </div>
           <div class='sf-plot'>{hero_svg()}</div>
         </section>""",
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns([3, 2], gap="large")
+    left, right = st.columns([1.25, 1], gap="large")
     with left:
         with st.container(border=True):
-            st.markdown("**Unggah data Anda**")
-            uploader("Pilih file CSV atau Excel", "main")
+            st.markdown("### :material/upload_file: Unggah Data Anda")
+            st.caption("Mendukung format `.csv` (koma/titik-koma otomatis) dan `.xlsx` hingga 20 MB.")
+            uploader("Pilih atau seret file CSV / Excel ke sini", "main")
     with right:
         with st.container(border=True):
-            st.markdown("**Atau coba dataset contoh**")
+            st.markdown("### :material/science: Coba Dataset Interaktif")
+            st.caption("Klik salah satu dataset di bawah untuk langsung mencoba seluruh fitur:")
             samples = sorted(SAMPLE_DIR.glob("*.csv")) if SAMPLE_DIR.exists() else []
             for path in samples:
                 title, desc = SAMPLE_INFO.get(path.stem, (path.stem.replace("_", " ").title(), ""))
-                if st.button(f"**{title}** · {desc}" if desc else title, key=f"sample_{path.stem}",
+                if st.button(f"**{title}** — {desc}" if desc else title, key=f"sample_{path.stem}",
                              use_container_width=True):
                     if ingest(path.read_bytes(), path.name, f"sample:{path.name}"):
                         st.rerun()
 
     st.markdown(
         """<ol class='sf-steps'>
-          <li><strong>Unggah data</strong><span>Duplikat dan sel kosong dibereskan otomatis.</span></li>
-          <li><strong>Pilih analisis</strong><span>Eksplorasi, modeling, clustering, atau Auto-ML.</span></li>
-          <li><strong>Baca penjelasannya</strong><span>Setiap grafik dan skor diberi arti singkat.</span></li>
+          <li><strong>Unggah atau Pilih Contoh</strong><span>Deteksi pemisah CSV otomatis, hapus duplikat, dan isi data kosong dalam sekejap.</span></li>
+          <li><strong>Eksplorasi & Eksperimen</strong><span>Filter baris, inspeksi distribusi tiap kolom, atur parameter cleaning, dan buat grafik kustom.</span></li>
+          <li><strong>Latih Model & Simulasikan</strong><span>Bandingkan Random Forest, Regression, & XGBoost, lalu uji tebakan data baru lewat simulator interaktif.</span></li>
         </ol>
         <div class='sf-features'>
-          <div><strong>Cleaning otomatis</strong><span>Hapus duplikat, isi data kosong, unduh hasilnya sebagai CSV.</span></div>
-          <div><strong>Eksplorasi dengan alasan</strong><span>Empat grafik paling informatif dipilih otomatis, lengkap dengan alasannya.</span></div>
-          <div><strong>Modeling</strong><span>Klasifikasi dan regresi dengan Random Forest, Logistic/Linear, dan XGBoost.</span></div>
-          <div><strong>Clustering</strong><span>K-Means, Hierarchical, dan DBSCAN beserta skor kualitas cluster.</span></div>
-          <div><strong>Auto-ML</strong><span>Cukup pilih kolom yang ingin ditebak; model terbaik dipilihkan.</span></div>
-          <div><strong>Privasi</strong><span>Data tidak disimpan ke disk server dan hilang saat sesi berakhir.</span></div>
+          <div><strong>🧹 Cleaning Kustom & Otomatis</strong><span>Atur ambang batas kolom kosong, metode pengisian nilai, lihat perbandingan sebelum/sesudah, dan unduh CSV bersih.</span></div>
+          <div><strong>📊 Eksplorasi & Inspektor Kolom</strong><span>Empat grafik insight otomatis + inspektor profil tiap kolom dan pembuat grafik bebas (Histogram, Box, Violin, Scatter, Line).</span></div>
+          <div><strong>🎯 Modeling + Simulator Prediksi</strong><span>Latih model klasifikasi/regresi dan gunakan slider interaktif untuk mengetes prediksi pada skenario baru secara langsung.</span></div>
+          <div><strong>🔍 Clustering Multi-Dimensi</strong><span>K-Means, Hierarchical, & DBSCAN dengan kurva Elbow/Silhouette dan visualisasi sebaran PCA maupun sumbu kolom asli.</span></div>
+          <div><strong>✨ Auto-ML Satu Klik</strong><span>Cukup tentukan kolom target; Statify mendeteksi tipe masalah, memilih fitur terbaik, dan menjelaskan hasilnya.</span></div>
+          <div><strong>🔒 Privasi & Performa Terjaga</strong><span>Pemrosesan 100% di memori sesi tanpa menulis ke disk, dilengkapi antrean pintar agar server selalu responsif.</span></div>
         </div>""",
         unsafe_allow_html=True,
     )
