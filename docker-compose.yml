@@ -1,0 +1,15 @@
+services:
+  statify:
+    build: .
+    image: statify:latest
+    container_name: statify
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8501:8501"   # hanya bisa diakses lewat Nginx
+    environment:
+      STATIFY_MAX_ROWS: "20000"
+      STATIFY_MAX_UPLOAD_MB: "20"
+      STATIFY_MAX_HEAVY_JOBS: "2"
+    mem_limit: 3500m
+    memswap_limit: 4500m
+    cpus: 2.0
